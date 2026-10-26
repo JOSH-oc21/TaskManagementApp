@@ -1,0 +1,228 @@
+@using TaskManagementApp.Models
+@using TaskManagementApp.Services
+@inject TaskStore TaskStore
+
+<PageTitle>Task Management</PageTitle>
+
+<div class="page-layout">
+    <section class="hero-card">
+        <div>
+            <p class="eyebrow">Overview</p>
+            <h1>Task Management</h1>
+        </div>
+        <div class="stats">
+            <div class="stat-box">
+                <span class="stat-value">@TotalTasks</span>
+                <span class="stat-label">Total</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-value">@CompletedTasks</span>
+                <span class="stat-label">Done</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-value">@PendingTasks</span>
+                <span class="stat-label">Pending</span>
+            </div>
+        </div>
+    </section>
+
+    <section class="form-card">
+        <h2>@(isEditing ? "Edit Task" : "Add New Task")</h2>
+
+        <EditForm Model="taskForm" OnValidSubmit="HandleSubmit">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="input-grid">
+                <div class="field">
+                    <label>Title</label>
+                    <InputText @bind-Value="taskForm.Title" />
+                </div>
+
+                <div class="field">
+                    <label>Category</label>
+                    <InputText @bind-Value="taskForm.Category" />
+                </div>
+
+                <div class="field">
+                    <label>Priority</label>
+                    <InputSelect @bind-Value="taskForm.Priority">
+                        <option value="Low">Low</option>
+                        <option value="Medium">Medium</option>
+                        <option value="High">High</option>
+                    </InputSelect>
+                </div>
+
+                <div class="field">
+                    <label>Due Date</label>
+                    <InputDate @bind-Value="taskForm.DueDate" />
+                </div>
+            </div>
+
+            <div class="field field-full">
+                <label>Description</label>
+                <InputTextArea @bind-Value="taskForm.Description" rows="4" />
+            </div>
+
+            <div class="actions">
+                <button type="submit" class="primary-btn">@((isEditing) ? "Save Changes" : "Add Task")</button>
+                @if (isEditing)
+                {
+                    <button type="button" class="secondary-btn" @onclick="CancelEdit">Cancel</button>
+                }
+            </div>
+        </EditForm>
+    </section>
+
+    <section class="list-card">
+        <div class="list-header">
+            <h2>Tasks</h2>
+            <div class="filters">
+                <button class="filter-btn @(filter == "all" ? "active" : "")" @onclick="() => filter = "all"">All</button>
+                <button class="filter-btn @(filter == "pending" ? "active" : "")" @onclick="() => filter = "pending"">Pending</button>
+                <button class="filter-btn @(filter == "done" ? "active" : "")" @onclick="() => filter = "done"">Completed</button>
+            </div>
+        </div>
+
+        @if (filteredTasks.Count == 0)
+        {
+            <p class="empty-state">No tasks available for this filter.</p>
+        }
+        else
+        {
+            <div class="task-list">
+                @foreach (var item in filteredTasks)
+                {
+                    <article class="task-item @(item.IsCompleted ? "done" : "")">
+                        <div class="task-main">
+                            <div class="task-check">
+                                <input type="checkbox" checked="@item.IsCompleted" @onchange="() => ToggleComplete(item)" />
+                            </div>
+                            <div>
+                                <h3>@item.Title</h3>
+                                <p>@item.Description</p>
+                                <div class="meta-row">
+                                    <span class="tag">@item.Category</span>
+                                    <span class="tag priority @item.Priority.ToLower()">@item.Priority</span>
+                                    <span>@item.DueDate.ToString("MMM dd, yyyy")</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="task-actions">
+                            <button class="icon-btn" @onclick="() => StartEdit(item)">Edit</button>
+                            <button class="icon-btn danger" @onclick="() => DeleteTask(item.Id)">Delete</button>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private List<TaskItem> tasks = new();
+    private TaskItemFormModel taskForm = new();
+    private bool isEditing;
+    private string filter = "all";
+
+    private int TotalTasks => tasks.Count;
+    private int CompletedTasks => tasks.Count(t => t.IsCompleted);
+    private int PendingTasks => tasks.Count(t => !t.IsCompleted);
+
+    private List<TaskItem> filteredTasks => filter switch
+    {
+        "pending" => tasks.Where(t => !t.IsCompleted).ToList(),
+        "done" => tasks.Where(t => t.IsCompleted).ToList(),
+        _ => tasks
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        tasks = await TaskStore.GetTasksAsync();
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (isEditing)
+        {
+            var item = tasks.FirstOrDefault(t => t.Id == taskForm.Id);
+            if (item != null)
+            {
+                item.Title = taskForm.Title;
+                item.Description = taskForm.Description;
+                item.Category = taskForm.Category;
+                item.Priority = taskForm.Priority;
+                item.DueDate = taskForm.DueDate;
+                await TaskStore.UpdateTaskAsync(item);
+            }
+        }
+        else
+        {
+            var vm = new TaskItem
+            {
+                Title = taskForm.Title,
+                Description = taskForm.Description,
+                Category = taskForm.Category,
+                Priority = taskForm.Priority,
+                DueDate = taskForm.DueDate,
+                IsCompleted = false
+            };
+
+            tasks.Insert(0, vm);
+            await TaskStore.AddTaskAsync(vm);
+        }
+
+        ResetForm();
+    }
+
+    private void StartEdit(TaskItem item)
+    {
+        isEditing = true;
+        taskForm = new TaskItemFormModel
+        {
+            Id = item.Id,
+            Title = item.Title,
+            Description = item.Description,
+            Category = item.Category,
+            Priority = item.Priority,
+            DueDate = item.DueDate
+        };
+    }
+
+    private void CancelEdit()
+    {
+        ResetForm();
+    }
+
+    private async Task DeleteTask(Guid id)
+    {
+        tasks.RemoveAll(t => t.Id == id);
+        await TaskStore.DeleteTaskAsync(id);
+        if (isEditing)
+        {
+            ResetForm();
+        }
+    }
+
+    private async Task ToggleComplete(TaskItem item)
+    {
+        item.IsCompleted = !item.IsCompleted;
+        await TaskStore.UpdateTaskAsync(item);
+    }
+
+    private void ResetForm()
+    {
+        taskForm = new TaskItemFormModel();
+        isEditing = false;
+    }
+
+    private class TaskItemFormModel
+    {
+        public Guid Id { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string Category { get; set; } = "General";
+        public string Priority { get; set; } = "Medium";
+        public DateTime DueDate { get; set; } = DateTime.Today.AddDays(1);
+    }
+}
